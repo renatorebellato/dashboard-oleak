@@ -270,3 +270,49 @@ table.campaigns tr:last-child td { border-bottom: none; }
   table.campaigns { font-size: 12px; }
   table.campaigns th, table.campaigns td { padding: 8px; }
 }
+
+/* Modo Ao vivo / Histórico */
+.mode-toggle {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.mode-toggle button {
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  border: none;
+  background: var(--surface);
+  color: var(--ink-muted);
+  padding: 8px 14px;
+  cursor: pointer;
+}
+.mode-toggle button.active {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.mode-toggle button:not(.active):hover { background: var(--surface-alt); }
+
+.live-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--ink-muted);
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+}
+.live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--good);
+  flex-shrink: 0;
+  animation: live-pulse 2s infinite;
+}
+@keyframes live-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(47, 111, 78, 0.45); }
+  70% { box-shadow: 0 0 0 6px rgba(47, 111, 78, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(47, 111, 78, 0); }
+}
+button.btn:disabled { opacity: 0.6; cursor: default; }
