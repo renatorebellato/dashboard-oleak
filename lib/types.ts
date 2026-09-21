@@ -72,6 +72,7 @@ export type PlatformBlock = {
 
 export type ReportData = {
   generated_at: string;
+  client_name?: string;
   period: { start: string; end: string };
   previous_period: { start: string; end: string };
   meta: PlatformBlock;
