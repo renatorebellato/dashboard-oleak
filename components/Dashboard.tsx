@@ -267,6 +267,16 @@ export default function Dashboard() {
           <button className="btn" onClick={() => setShowImport(true)}>
             Importar relatório
           </button>
+
+          <button
+            className="btn"
+            onClick={async () => {
+              await fetch("/api/auth/logout", { method: "POST" });
+              window.location.href = "/login";
+            }}
+          >
+            Sair
+          </button>
         </div>
       </div>
 
