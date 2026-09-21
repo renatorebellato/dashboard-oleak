@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState, useCallback } from "react";
-import { supabase } from "@/lib/supabaseClient";
 import type { ReportData, WeeklyReportRow } from "@/lib/types";
 import { fmtBRL, fmtInt, fmtPct, fmtRoas, fmtDateRange, deltaLabel, deltaDirection } from "@/lib/format";
 import { combineMetricSets, deltaPct } from "@/lib/metrics";
@@ -15,6 +14,7 @@ import InvestmentSplit from "@/components/InvestmentSplit";
 import BudgetControl, { useMonthlyBudget } from "@/components/BudgetControl";
 
 const LIVE_REFRESH_MS = 5 * 60 * 1000; // atualiza sozinho a cada 5 minutos
+const HISTORY_REFRESH_MS = 2 * 60 * 1000; // recarrega o histórico sozinho a cada 2 minutos
 
 function StatTile({
   label,
@@ -167,28 +167,27 @@ export default function Dashboard() {
   const [showImport, setShowImport] = useState(false);
 
   const loadReports = useCallback(async () => {
-    const { data, error } = await supabase
-      .from("weekly_reports")
-      .select("*")
-      .order("period_start", { ascending: false });
-    if (!error && data) {
-      setReports(data as WeeklyReportRow[]);
-      setSelectedId((prev) => prev ?? (data[0]?.id ?? null));
+    try {
+      const res = await fetch("/api/reports", { cache: "no-store" });
+      if (res.ok) {
+        const json = await res.json();
+        const data = (json.reports ?? []) as WeeklyReportRow[];
+        setReports(data);
+        setSelectedId((prev) => prev ?? (data[0]?.id ?? null));
+      }
+    } catch {
+      // silencioso — mantém o que já tinha carregado
     }
     setReportsLoaded(true);
   }, []);
 
   useEffect(() => {
     loadReports();
-    const channel = supabase
-      .channel("weekly_reports_changes")
-      .on("postgres_changes", { event: "*", schema: "public", table: "weekly_reports" }, () => {
-        loadReports();
-      })
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    // Sem Realtime do Supabase aqui (a leitura agora passa por uma rota
+    // autenticada, não pela chave anon direto do navegador) — em vez
+    // disso, atualiza sozinho de tempos em tempos.
+    const interval = setInterval(loadReports, HISTORY_REFRESH_MS);
+    return () => clearInterval(interval);
   }, [loadReports]);
 
   const selected = useMemo(
@@ -215,11 +214,13 @@ export default function Dashboard() {
       "Google Ads + Meta Ads"
     );
 
+  const clientName = (mode === "live" ? liveData?.client_name : selected?.data?.client_name) ?? "Dashboard";
+
   return (
     <div className="wrap">
       <div className="header">
         <div className="titles">
-          <h1>Oleak — Performance de mídia paga</h1>
+          <h1>{clientName} — Performance de mídia paga</h1>
           <div className="sub">{subtitle}</div>
         </div>
         <div className="actions">
@@ -272,7 +273,8 @@ export default function Dashboard() {
             className="btn"
             onClick={async () => {
               await fetch("/api/auth/logout", { method: "POST" });
-              window.location.href = "/login";
+              const m = window.location.pathname.match(/^\/c\/([a-z0-9-]+)/);
+              window.location.href = m ? `/c/${m[1]}/login` : "/login";
             }}
           >
             Sair

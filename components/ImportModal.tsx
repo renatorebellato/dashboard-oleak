@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { supabase } from "@/lib/supabaseClient";
 import type { ReportData } from "@/lib/types";
 
 export default function ImportModal({
@@ -29,22 +28,24 @@ export default function ImportModal({
       return;
     }
     setSaving(true);
-    const { error: upsertError } = await supabase.from("weekly_reports").upsert(
-      {
-        period_start: parsed.period.start,
-        period_end: parsed.period.end,
-        prev_period_start: parsed.previous_period.start,
-        prev_period_end: parsed.previous_period.end,
-        data: parsed,
-        generated_at: parsed.generated_at ?? new Date().toISOString(),
-      },
-      { onConflict: "period_start,period_end" }
-    );
-    setSaving(false);
-    if (upsertError) {
-      setError(`Erro ao salvar: ${upsertError.message}`);
+    try {
+      const res = await fetch("/api/reports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(parsed),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(`Erro ao salvar: ${json?.error ?? res.statusText}`);
+        setSaving(false);
+        return;
+      }
+    } catch (e: any) {
+      setError(`Erro ao salvar: ${String(e?.message ?? e)}`);
+      setSaving(false);
       return;
     }
+    setSaving(false);
     onImported();
     onClose();
   }
