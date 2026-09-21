@@ -218,36 +218,36 @@ function buildDailySalesSeries(rows: any[]): DailySalesPoint[] {
 // --- Anúncios destaque (maior ROAS e mais compras), com preview do criativo ---
 
 async function fetchAdCreatives(
+  accountId: string,
   adIds: string[]
 ): Promise<Record<string, { image_url?: string; thumbnail_url?: string }>> {
   if (adIds.length === 0) return {};
+  // O parâmetro "ids" do endpoint multi-objeto (GET /?ids=...) foi
+  // descontinuado no Graph API v26.0+ ("The ids query parameter is
+  // deprecated in v26.0+"), então buscamos os anúncios filtrando por id
+  // dentro da própria conta (/act_{id}/ads?filtering=...).
   // thumbnail_url/image_url no nível raiz da criativa cobrem a maioria dos
   // anúncios, mas ficam vazios em formatos dinâmicos/Advantage+ (catálogo,
   // carrossel automático) — nesses casos a imagem só existe dentro de
   // object_story_spec (foto, vídeo ou link) ou do asset_feed_spec.
-  const json = await metaFetch("", {
-    ids: adIds.join(","),
+  const rows = await fetchAllPages(`/act_${accountId}/ads`, {
+    filtering: JSON.stringify([{ field: "id", operator: "IN", value: adIds }]),
     fields:
-      "creative{thumbnail_url,image_url,object_story_spec,asset_feed_spec{images}}",
+      "id,creative{thumbnail_url,image_url,object_story_spec,asset_feed_spec{images}}",
+    limit: "500",
   });
+
   const out: Record<string, { image_url?: string; thumbnail_url?: string }> = {};
-  for (const id of adIds) {
-    const c = json[id]?.creative;
+  for (const row of rows) {
+    const c = row.creative;
     if (!c) continue;
 
     const oss = c.object_story_spec ?? {};
     const fromStory = oss.photo_data?.url ?? oss.video_data?.image_url ?? oss.link_data?.picture;
     const fromAssetFeed = c.asset_feed_spec?.images?.[0]?.url;
 
-    const resolvedImage = c.image_url ?? fromStory ?? fromAssetFeed;
-    if (!resolvedImage && !c.thumbnail_url) {
-      // Debug temporário: nenhum campo conhecido trouxe imagem para este
-      // anúncio — loga a criativa crua para inspecionar via Vercel Logs.
-      console.error("[debug creative] sem imagem para ad_id=" + id, JSON.stringify(c));
-    }
-
-    out[id] = {
-      image_url: resolvedImage,
+    out[row.id] = {
+      image_url: c.image_url ?? fromStory ?? fromAssetFeed,
       thumbnail_url: c.thumbnail_url,
     };
   }
@@ -306,7 +306,7 @@ async function fetchTopSalesAds(
   const ids = Array.from(new Set([byRoas.ad_id, byConversions.ad_id]));
   let creatives: Record<string, { image_url?: string; thumbnail_url?: string }> = {};
   try {
-    creatives = await fetchAdCreatives(ids);
+    creatives = await fetchAdCreatives(accountId, ids);
   } catch (e) {
     console.error("Erro ao buscar criativos dos anúncios destaque:", e);
   }
