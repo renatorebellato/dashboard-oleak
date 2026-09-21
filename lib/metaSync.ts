@@ -239,8 +239,15 @@ async function fetchAdCreatives(
     const fromStory = oss.photo_data?.url ?? oss.video_data?.image_url ?? oss.link_data?.picture;
     const fromAssetFeed = c.asset_feed_spec?.images?.[0]?.url;
 
+    const resolvedImage = c.image_url ?? fromStory ?? fromAssetFeed;
+    if (!resolvedImage && !c.thumbnail_url) {
+      // Debug temporário: nenhum campo conhecido trouxe imagem para este
+      // anúncio — loga a criativa crua para inspecionar via Vercel Logs.
+      console.error("[debug creative] sem imagem para ad_id=" + id, JSON.stringify(c));
+    }
+
     out[id] = {
-      image_url: c.image_url ?? fromStory ?? fromAssetFeed,
+      image_url: resolvedImage,
       thumbnail_url: c.thumbnail_url,
     };
   }
