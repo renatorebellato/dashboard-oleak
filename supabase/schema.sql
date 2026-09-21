@@ -57,7 +57,17 @@ drop policy if exists "allow all - mvp sem login" on weekly_reports;
 
 -- Não usamos mais Supabase Realtime nesta tabela (a tela busca via API
 -- autenticada agora, não mais direto do navegador) — remove da publicação.
-alter publication supabase_realtime drop table if exists weekly_reports;
+-- "alter publication ... drop table" nao aceita "if exists", entao
+-- checamos antes se a tabela esta mesmo na publicacao.
+do $$
+begin
+  if exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and tablename = 'weekly_reports'
+  ) then
+    execute 'alter publication supabase_realtime drop table weekly_reports';
+  end if;
+end $$;
 
 -- ============================================================
 -- 3) Migração: cadastra a Oleak como o primeiro cliente e liga o relatório
