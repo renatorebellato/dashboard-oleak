@@ -221,14 +221,28 @@ async function fetchAdCreatives(
   adIds: string[]
 ): Promise<Record<string, { image_url?: string; thumbnail_url?: string }>> {
   if (adIds.length === 0) return {};
+  // thumbnail_url/image_url no nível raiz da criativa cobrem a maioria dos
+  // anúncios, mas ficam vazios em formatos dinâmicos/Advantage+ (catálogo,
+  // carrossel automático) — nesses casos a imagem só existe dentro de
+  // object_story_spec (foto, vídeo ou link) ou do asset_feed_spec.
   const json = await metaFetch("", {
     ids: adIds.join(","),
-    fields: "creative{thumbnail_url,image_url}",
+    fields:
+      "creative{thumbnail_url,image_url,object_story_spec,asset_feed_spec{images}}",
   });
   const out: Record<string, { image_url?: string; thumbnail_url?: string }> = {};
   for (const id of adIds) {
     const c = json[id]?.creative;
-    if (c) out[id] = { image_url: c.image_url, thumbnail_url: c.thumbnail_url };
+    if (!c) continue;
+
+    const oss = c.object_story_spec ?? {};
+    const fromStory = oss.photo_data?.url ?? oss.video_data?.image_url ?? oss.link_data?.picture;
+    const fromAssetFeed = c.asset_feed_spec?.images?.[0]?.url;
+
+    out[id] = {
+      image_url: c.image_url ?? fromStory ?? fromAssetFeed,
+      thumbnail_url: c.thumbnail_url,
+    };
   }
   return out;
 }
