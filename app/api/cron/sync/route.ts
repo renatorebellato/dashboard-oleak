@@ -3,15 +3,10 @@ import { computeWeekPeriod } from "@/lib/period";
 import { fetchMetaPlatformBlock } from "@/lib/metaSync";
 import { fetchGooglePlatformBlock } from "@/lib/googleSync";
 import { getOrInitReport, saveReport } from "@/lib/reportStore";
+import { listActiveClients } from "@/lib/clients";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
-
-const META_ACCOUNT_ID = "271327700853914";
-const META_ACCOUNT_NAME = "OLEAK INDUSTRIA E COMERCIO LTDA";
-const GOOGLE_CUSTOMER_ID = "3707738500";
-const GOOGLE_ACCOUNT_NAME = "Oleak - Ativa";
-const GOOGLE_MCC_NAME = "Elo Criativo";
+export const maxDuration = 300;
 
 function isAuthorized(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
@@ -28,54 +23,69 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-const { period, previous_period } = computeWeekPeriod();
-  const summary: Record<string, unknown> = { period, previous_period };
+  const { period, previous_period } = computeWeekPeriod();
+  const clients = await listActiveClients();
 
-const report = await getOrInitReport({
-  period,
-  previousPeriod: previous_period,
-  metaAccountId: META_ACCOUNT_ID,
-  metaAccountName: META_ACCOUNT_NAME,
-  googleAccountId: GOOGLE_CUSTOMER_ID,
-  googleAccountName: GOOGLE_ACCOUNT_NAME,
-});
+  // Roda os clientes em paralelo — cada um é independente, e assim o tempo
+  // total não cresce linearmente com o número de clientes.
+  const results = await Promise.all(
+    clients.map(async (client) => {
+      const entry: Record<string, unknown> = { slug: client.slug };
 
-// Meta Ads
-try {
-  report.meta = await fetchMetaPlatformBlock({
-    accountId: META_ACCOUNT_ID,
-    accountName: META_ACCOUNT_NAME,
-    period,
-    previousPeriod: previous_period,
-  });
-  summary.meta = { ok: true, campanhas: report.meta.campaigns.length };
-} catch (e: any) {
-  console.error("Erro ao sincronizar Meta Ads:", e);
-  summary.meta = { ok: false, error: String(e?.message ?? e) };
-}
+      const report = await getOrInitReport({
+        clientId: client.id,
+        clientName: client.name,
+        period,
+        previousPeriod: previous_period,
+        metaAccountId: client.meta_account_id ?? "",
+        metaAccountName: client.meta_account_name ?? client.name,
+        googleAccountId: client.google_customer_id ?? "",
+        googleAccountName: client.google_account_name ?? client.name,
+      });
+      report.client_name = client.name;
 
-// Google Ads (a própria função já trata erro internamente e nunca lança)
-report.google = await fetchGooglePlatformBlock({
-  customerId: GOOGLE_CUSTOMER_ID,
-  accountName: GOOGLE_ACCOUNT_NAME,
-  mccName: GOOGLE_MCC_NAME,
-  period,
-  previousPeriod: previous_period,
-});
-  summary.google = {
-    ok: report.google.status !== "erro_sincronizacao",
-    campanhas: report.google.campaigns.length,
-    status: report.google.status,
-  };
+      if (client.meta_account_id) {
+        try {
+          report.meta = await fetchMetaPlatformBlock({
+            accountId: client.meta_account_id,
+            accountName: client.meta_account_name ?? client.name,
+            period,
+            previousPeriod: previous_period,
+          });
+          entry.meta = { ok: true, campanhas: report.meta.campaigns.length };
+        } catch (e: any) {
+          console.error(`Erro ao sincronizar Meta Ads [${client.slug}]:`, e);
+          entry.meta = { ok: false, error: String(e?.message ?? e) };
+        }
+      }
 
-try {
-  await saveReport(report);
-  summary.saved = true;
-} catch (e: any) {
-  console.error("Erro ao salvar relatório:", e);
-  summary.saved = false;
-  summary.save_error = String(e?.message ?? e);
-}
+      if (client.google_customer_id) {
+        report.google = await fetchGooglePlatformBlock({
+          customerId: client.google_customer_id,
+          accountName: client.google_account_name ?? client.name,
+          mccName: client.google_mcc_name ?? "Elo Criativo",
+          period,
+          previousPeriod: previous_period,
+        });
+        entry.google = {
+          ok: report.google.status !== "erro_sincronizacao",
+          campanhas: report.google.campaigns.length,
+          status: report.google.status,
+        };
+      }
 
-return NextResponse.json(summary);
+      try {
+        await saveReport(report, client.id);
+        entry.saved = true;
+      } catch (e: any) {
+        console.error(`Erro ao salvar relatório [${client.slug}]:`, e);
+        entry.saved = false;
+        entry.save_error = String(e?.message ?? e);
+      }
+
+      return entry;
+    })
+  );
+
+  return NextResponse.json({ period, previous_period, clients: results });
 }
