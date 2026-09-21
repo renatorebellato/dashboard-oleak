@@ -509,3 +509,39 @@ button.btn:disabled { opacity: 0.6; cursor: default; }
 }
 .ad-card-stats { display: flex; gap: 14px; font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px; }
 .ad-card-stats .k { display: block; font-size: 9.5px; color: var(--ink-muted); font-family: "Inter", sans-serif; }
+
+/* Login (senha única de acesso ao dashboard) */
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.login-card {
+  width: 100%;
+  max-width: 360px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  padding: 28px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.login-title { font-size: 17px; font-weight: 800; letter-spacing: -0.01em; }
+.login-sub { color: var(--ink-muted); font-size: 13px; margin-bottom: 14px; }
+.login-input {
+  font-family: inherit;
+  font-size: 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--ink);
+  padding: 10px 12px;
+  margin-bottom: 4px;
+}
+.login-input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.login-error { color: var(--danger); font-size: 12.5px; margin: 4px 0 2px; }
+.login-button { margin-top: 10px; width: 100%; text-align: center; }
