@@ -4,8 +4,15 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import type { ReportData, WeeklyReportRow } from "@/lib/types";
 import { fmtBRL, fmtInt, fmtPct, fmtRoas, fmtDateRange, deltaLabel, deltaDirection } from "@/lib/format";
+import { combineMetricSets, deltaPct } from "@/lib/metrics";
+import { periodDays } from "@/lib/period";
 import CampaignTable from "@/components/CampaignTable";
 import ImportModal from "@/components/ImportModal";
+import PeriodControl, { presetToRange } from "@/components/PeriodControl";
+import SalesChart from "@/components/SalesChart";
+import TopAdsHighlight from "@/components/TopAdsHighlight";
+import InvestmentSplit from "@/components/InvestmentSplit";
+import BudgetControl, { useMonthlyBudget } from "@/components/BudgetControl";
 
 const LIVE_REFRESH_MS = 5 * 60 * 1000; // atualiza sozinho a cada 5 minutos
 
@@ -31,21 +38,43 @@ function StatTile({
   );
 }
 
-function ReportView({ data }: { data: ReportData }) {
+function ReportView({
+  data,
+  monthlyBudget,
+  onChangeBudget,
+}: {
+  data: ReportData;
+  monthlyBudget: number | null;
+  onChangeBudget: (v: number | null) => void;
+}) {
   const meta = data.meta;
   const google = data.google;
-  const mc = meta.consolidated;
+
+  const combinedCurr = combineMetricSets(meta.consolidated?.curr, google.consolidated?.curr);
+  const combinedPrev = combineMetricSets(meta.consolidated?.prev, google.consolidated?.prev);
+  const combinedDelta = deltaPct(combinedCurr, combinedPrev);
+  const days = periodDays(data.period);
 
   return (
     <>
-      {mc && (
-        <div className="tiles">
-          <StatTile label="Investimento total" value={fmtBRL(mc.curr.spend)} deltaPct={mc.delta_pct.spend} inverse />
-          <StatTile label="Impressões" value={fmtInt(mc.curr.impressions)} deltaPct={mc.delta_pct.impressions} />
-          <StatTile label="Cliques" value={fmtInt(mc.curr.clicks)} deltaPct={mc.delta_pct.clicks} />
-          <StatTile label="CTR" value={fmtPct(mc.curr.ctr)} deltaPct={mc.delta_pct.ctr} />
-          <StatTile label="Conversões" value={fmtInt(mc.curr.conversions)} deltaPct={mc.delta_pct.conversions} />
-          <StatTile label="ROAS" value={fmtRoas(mc.curr.roas)} deltaPct={mc.delta_pct.roas} />
+      {(meta.consolidated || google.consolidated) && (
+        <div className="summary-block">
+          <div className="tiles">
+            <StatTile label="Investimento total" value={fmtBRL(combinedCurr.spend)} deltaPct={combinedDelta.spend} inverse />
+            <StatTile label="Impressões" value={fmtInt(combinedCurr.impressions)} deltaPct={combinedDelta.impressions} />
+            <StatTile label="Cliques" value={fmtInt(combinedCurr.clicks)} deltaPct={combinedDelta.clicks} />
+            <StatTile label="CTR" value={fmtPct(combinedCurr.ctr)} deltaPct={combinedDelta.ctr} />
+            <StatTile label="Conversões" value={fmtInt(combinedCurr.conversions)} deltaPct={combinedDelta.conversions} />
+            <StatTile label="ROAS" value={fmtRoas(combinedCurr.roas)} deltaPct={combinedDelta.roas} />
+          </div>
+          <InvestmentSplit metaSpend={meta.consolidated?.curr.spend ?? 0} googleSpend={google.consolidated?.curr.spend ?? 0} />
+          <BudgetControl
+            metaSpend={meta.consolidated?.curr.spend ?? 0}
+            googleSpend={google.consolidated?.curr.spend ?? 0}
+            days={days}
+            monthlyBudget={monthlyBudget}
+            onChangeBudget={onChangeBudget}
+          />
         </div>
       )}
 
@@ -54,43 +83,20 @@ function ReportView({ data }: { data: ReportData }) {
         <div className="platform-header">
           <span className="platform-badge meta">Meta Ads</span>
           <h2>{meta.account_name}</h2>
-          <span className="acct">conta {meta.account_id}</span>
+          <span className="acct">
+            conta {meta.account_id}
+            {meta.consolidated && ` · ${fmtBRL(meta.consolidated.curr.spend)} investidos`}
+          </span>
         </div>
         {meta.campaigns.length > 0 ? (
           <>
             <CampaignTable campaigns={meta.campaigns} />
-            {meta.top_ad && (
-              <div className="highlight-card">
-                <div>
-                  <div className="label">Anúncio destaque da semana</div>
-                  <div className="name">{meta.top_ad.name}</div>
-                </div>
-                <div className="stats">
-                  <div>
-                    <span className="k">Investimento</span>
-                    {fmtBRL(meta.top_ad.spend)}
-                  </div>
-                  <div>
-                    <span className="k">Conversões</span>
-                    {fmtInt(meta.top_ad.conversions)}
-                  </div>
-                  <div>
-                    <span className="k">Valor gerado</span>
-                    {fmtBRL(meta.top_ad.conv_value)}
-                  </div>
-                  <div>
-                    <span className="k">ROAS</span>
-                    {fmtRoas(meta.top_ad.roas)}
-                  </div>
-                </div>
-              </div>
-            )}
+            <TopAdsHighlight roas={meta.top_ad_roas} conversions={meta.top_ad_conversions} />
+            {meta.daily_sales && meta.daily_sales.length > 0 && <SalesChart data={meta.daily_sales} />}
             {meta.excluded_note && <p className="footer-note">{meta.excluded_note}</p>}
           </>
         ) : (
-          <div className="empty-state">
-            {meta.note ?? "Sem campanhas ativas ou com impressões no período."}
-          </div>
+          <div className="empty-state">{meta.note ?? "Sem campanhas ativas ou com impressões no período."}</div>
         )}
       </section>
 
@@ -99,14 +105,16 @@ function ReportView({ data }: { data: ReportData }) {
         <div className="platform-header">
           <span className="platform-badge google">Google Ads</span>
           <h2>{google.account_name}</h2>
-          <span className="acct">conta {google.account_id}{google.mcc ? ` · MCC ${google.mcc}` : ""}</span>
+          <span className="acct">
+            conta {google.account_id}
+            {google.mcc ? ` · MCC ${google.mcc}` : ""}
+            {google.consolidated && ` · ${fmtBRL(google.consolidated.curr.spend)} investidos`}
+          </span>
         </div>
         {google.campaigns.length > 0 ? (
           <CampaignTable campaigns={google.campaigns} />
         ) : (
-          <div className="empty-state">
-            {google.note ?? "Sem campanhas ativas ou com impressões no período."}
-          </div>
+          <div className="empty-state">{google.note ?? "Sem campanhas ativas ou com impressões no período."}</div>
         )}
       </section>
     </>
@@ -115,35 +123,42 @@ function ReportView({ data }: { data: ReportData }) {
 
 export default function Dashboard() {
   const [mode, setMode] = useState<"live" | "historico">("live");
+  const [monthlyBudget, setMonthlyBudget] = useMonthlyBudget();
 
   // --- Modo Ao vivo: busca direto do Meta Ads e Google Ads via /api/live ---
+  const [period, setPeriod] = useState(() => ({ key: "7d", ...presetToRange("7d") }));
   const [liveData, setLiveData] = useState<ReportData | null>(null);
   const [liveLoading, setLiveLoading] = useState(true);
   const [liveError, setLiveError] = useState<string | null>(null);
   const [liveUpdatedAt, setLiveUpdatedAt] = useState<Date | null>(null);
 
-  const loadLive = useCallback(async (opts?: { silent?: boolean }) => {
-    if (!opts?.silent) setLiveLoading(true);
-    setLiveError(null);
-    try {
-      const res = await fetch("/api/live", { cache: "no-store" });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error ?? "Falha ao carregar dados ao vivo.");
-      setLiveData(json as ReportData);
-      setLiveUpdatedAt(new Date());
-    } catch (e: any) {
-      setLiveError(String(e?.message ?? e));
-    } finally {
-      setLiveLoading(false);
-    }
-  }, []);
+  const loadLive = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      if (!period.start || !period.end || period.start > period.end) return;
+      if (!opts?.silent) setLiveLoading(true);
+      setLiveError(null);
+      try {
+        const qs = new URLSearchParams({ start: period.start, end: period.end }).toString();
+        const res = await fetch(`/api/live?${qs}`, { cache: "no-store" });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json?.error ?? "Falha ao carregar dados ao vivo.");
+        setLiveData(json as ReportData);
+        setLiveUpdatedAt(new Date());
+      } catch (e: any) {
+        setLiveError(String(e?.message ?? e));
+      } finally {
+        setLiveLoading(false);
+      }
+    },
+    [period]
+  );
 
   useEffect(() => {
     loadLive();
     const interval = setInterval(() => loadLive({ silent: true }), LIVE_REFRESH_MS);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [period.start, period.end]);
 
   // --- Modo Histórico: relatórios semanais salvos no Supabase ---
   const [reports, setReports] = useState<WeeklyReportRow[]>([]);
@@ -219,6 +234,12 @@ export default function Dashboard() {
 
           {mode === "live" && (
             <>
+              <PeriodControl
+                selectedKey={period.key}
+                customStart={period.key === "custom" ? period.start : ""}
+                customEnd={period.key === "custom" ? period.end : ""}
+                onChange={(sel) => setPeriod(sel)}
+              />
               <span className="live-indicator">
                 <span className="live-dot" />
                 {liveLoading ? "Atualizando…" : lastUpdatedLabel ? `Atualizado às ${lastUpdatedLabel}` : ""}
@@ -269,7 +290,7 @@ export default function Dashboard() {
                 sucesso.
               </p>
             )}
-            <ReportView data={liveData} />
+            <ReportView data={liveData} monthlyBudget={monthlyBudget} onChangeBudget={setMonthlyBudget} />
             <p className="footer-note">
               Dados buscados direto do Meta Ads e do Google Ads em {new Date(liveData.generated_at).toLocaleString("pt-BR")}
               . Atualiza sozinho a cada 5 minutos, ou clique em &quot;Atualizar agora&quot;.
@@ -285,7 +306,7 @@ export default function Dashboard() {
         </div>
       ) : (
         <>
-          <ReportView data={selected.data} />
+          <ReportView data={selected.data} monthlyBudget={monthlyBudget} onChangeBudget={setMonthlyBudget} />
           <p className="footer-note">
             Relatório gerado em {new Date(selected.data.generated_at).toLocaleString("pt-BR")}
           </p>
