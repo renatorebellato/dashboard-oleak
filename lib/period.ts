@@ -55,3 +55,32 @@ export function computeLiveWeekPeriod(referenceDate: Date = new Date()) {
     previous_period: { start: fmt(prevStart), end: fmt(prevEnd) },
   };
 }
+
+// Período customizado: recebe início/fim escolhidos no filtro do dashboard
+// (presets de 7/14/30 dias, mês atual, ou datas livres) e calcula o período
+// anterior com a mesma duração, imediatamente antes do início escolhido.
+export function computeCustomPeriod(startStr: string, endStr: string) {
+  const start = new Date(`${startStr}T00:00:00Z`);
+  const end = new Date(`${endStr}T00:00:00Z`);
+  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+
+  const days = Math.max(1, Math.round((end.getTime() - start.getTime()) / 86400000) + 1);
+
+  const prevEnd = new Date(start);
+  prevEnd.setUTCDate(prevEnd.getUTCDate() - 1);
+  const prevStart = new Date(prevEnd);
+  prevStart.setUTCDate(prevStart.getUTCDate() - (days - 1));
+
+  return {
+    period: { start: fmt(start), end: fmt(end) },
+    previous_period: { start: fmt(prevStart), end: fmt(prevEnd) },
+  };
+}
+
+// Número de dias (inclusive) de um período — usado para calcular médias
+// diárias (ex: controle de orçamento diário).
+export function periodDays(period: { start: string; end: string }): number {
+  const start = new Date(`${period.start}T00:00:00Z`);
+  const end = new Date(`${period.end}T00:00:00Z`);
+  return Math.max(1, Math.round((end.getTime() - start.getTime()) / 86400000) + 1);
+}

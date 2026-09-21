@@ -32,6 +32,18 @@ export type TopAd = {
   conv_value: number;
   roas: number;
   share_of_campaign_conversions?: number;
+  image_url?: string;
+  thumbnail_url?: string;
+};
+
+// Um ponto da série diária de compras/ROAS (só campanhas com objetivo de
+// vendas), usado no gráfico do modo Ao vivo.
+export type DailySalesPoint = {
+  date: string; // YYYY-MM-DD
+  purchases: number;
+  spend: number;
+  conv_value: number;
+  roas: number | null;
 };
 
 export type PlatformBlock = {
@@ -48,6 +60,13 @@ export type PlatformBlock = {
   };
   top_ad?: TopAd;
   best_roas_adset?: TopAd;
+  // Anúncios destaque calculados automaticamente (só quando includeSalesInsights
+  // é pedido, ex: no modo Ao vivo) — maior ROAS e mais compras, dentro das
+  // campanhas com objetivo de vendas.
+  top_ad_roas?: TopAd;
+  top_ad_conversions?: TopAd;
+  // Série diária de compras + ROAS (idem, só quando includeSalesInsights).
+  daily_sales?: DailySalesPoint[];
   excluded_note?: string;
 };
 

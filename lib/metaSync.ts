@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import type { Campaign, MetricSet, PlatformBlock } from "./types";
+import type { Campaign, MetricSet, PlatformBlock, TopAd, DailySalesPoint } from "./types";
 import { deltaPct, round } from "./metrics";
 
 // Versão da Graph API / Marketing API. Atualize periodicamente — a Meta
@@ -21,7 +21,7 @@ const RESULT_ACTION_TYPES = [
   "onsite_conversion.lead_grouped",
   "onsite_conversion.messaging_conversation_started_7d",
   "onsite_conversion.total_messaging_connection",
-  ];
+];
 
 const RESULT_LABELS: Record<string, string> = {
   "offsite_conversion.fb_pixel_purchase": "Compras no site",
@@ -33,6 +33,20 @@ const RESULT_LABELS: Record<string, string> = {
   "onsite_conversion.messaging_conversation_started_7d": "Conversas iniciadas",
   "onsite_conversion.total_messaging_connection": "Conversas iniciadas",
 };
+
+// Subconjunto de RESULT_ACTION_TYPES que representa especificamente COMPRAS
+// (não leads/conversas) — usado no gráfico diário e no destaque de anúncios,
+// que só fazem sentido para campanhas com objetivo de vendas.
+const PURCHASE_ACTION_TYPES = [
+  "offsite_conversion.fb_pixel_purchase",
+  "onsite_conversion.purchase",
+  "purchase",
+  "omni_purchase",
+];
+
+// Objetivos de campanha considerados "de vendas" (taxonomia nova da Meta e a
+// legada, que ainda aparece em campanhas mais antigas).
+const SALES_OBJECTIVES = ["OUTCOME_SALES", "CONVERSIONS"];
 
 function appSecretProof(accessToken: string, appSecret: string): string {
   return crypto.createHmac("sha256", appSecret).update(accessToken).digest("hex");
@@ -161,70 +175,229 @@ function sumMetricSet(rows: Campaign[], side: "curr" | "prev"): MetricSet {
   return { spend, impressions, clicks, ctr, conversions, conv_value, cpa, roas };
 }
 
+// --- Série diária de compras + ROAS, restrita às campanhas de vendas ---
+
+async function fetchDailySalesInsights(
+  accountId: string,
+  campaignIds: string[],
+  since: string,
+  until: string
+): Promise<any[]> {
+  if (campaignIds.length === 0) return [];
+  return fetchAllPages(`/act_${accountId}/insights`, {
+    level: "campaign",
+    time_increment: "1",
+    time_range: JSON.stringify({ since, until }),
+    filtering: JSON.stringify([{ field: "campaign.id", operator: "IN", value: campaignIds }]),
+    fields: "date_start,spend,actions,action_values",
+    limit: "500",
+  });
+}
+
+function buildDailySalesSeries(rows: any[]): DailySalesPoint[] {
+  const byDate = new Map<string, { spend: number; purchases: number; conv_value: number }>();
+  for (const row of rows) {
+    const date = row.date_start as string;
+    const bucket = byDate.get(date) ?? { spend: 0, purchases: 0, conv_value: 0 };
+    bucket.spend += Number(row.spend ?? 0);
+    bucket.purchases += extractActionValue(row.actions, PURCHASE_ACTION_TYPES);
+    bucket.conv_value += extractActionValue(row.action_values, PURCHASE_ACTION_TYPES);
+    byDate.set(date, bucket);
+  }
+  return Array.from(byDate.entries())
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([date, b]) => ({
+      date,
+      purchases: Math.round(b.purchases),
+      spend: round(b.spend, 2),
+      conv_value: round(b.conv_value, 2),
+      roas: b.spend > 0 && b.conv_value > 0 ? round(b.conv_value / b.spend, 4) : null,
+    }));
+}
+
+// --- Anúncios destaque (maior ROAS e mais compras), com preview do criativo ---
+
+async function fetchAdCreatives(
+  adIds: string[]
+): Promise<Record<string, { image_url?: string; thumbnail_url?: string }>> {
+  if (adIds.length === 0) return {};
+  const json = await metaFetch("", {
+    ids: adIds.join(","),
+    fields: "creative{thumbnail_url,image_url}",
+  });
+  const out: Record<string, { image_url?: string; thumbnail_url?: string }> = {};
+  for (const id of adIds) {
+    const c = json[id]?.creative;
+    if (c) out[id] = { image_url: c.image_url, thumbnail_url: c.thumbnail_url };
+  }
+  return out;
+}
+
+async function fetchTopSalesAds(
+  accountId: string,
+  campaignIds: string[],
+  since: string,
+  until: string
+): Promise<{ top_ad_roas?: TopAd; top_ad_conversions?: TopAd }> {
+  if (campaignIds.length === 0) return {};
+
+  const rows = await fetchAllPages(`/act_${accountId}/insights`, {
+    level: "ad",
+    time_range: JSON.stringify({ since, until }),
+    filtering: JSON.stringify([{ field: "campaign.id", operator: "IN", value: campaignIds }]),
+    fields: "ad_id,ad_name,campaign_name,spend,actions,action_values",
+    limit: "500",
+  });
+
+  type Candidate = {
+    ad_id: string;
+    name: string;
+    campaign: string;
+    spend: number;
+    conversions: number;
+    conv_value: number;
+    roas: number | null;
+  };
+
+  const candidates: Candidate[] = rows
+    .map((r: any) => {
+      const spend = Number(r.spend ?? 0);
+      const conversions = extractActionValue(r.actions, PURCHASE_ACTION_TYPES);
+      const conv_value = extractActionValue(r.action_values, PURCHASE_ACTION_TYPES);
+      const roas = spend > 0 && conv_value > 0 ? conv_value / spend : null;
+      return {
+        ad_id: r.ad_id as string,
+        name: (r.ad_name as string) ?? (r.ad_id as string),
+        campaign: r.campaign_name as string,
+        spend: round(spend, 2),
+        conversions: Math.round(conversions),
+        conv_value: round(conv_value, 2),
+        roas: roas != null ? round(roas, 6) : null,
+      };
+    })
+    .filter((c: Candidate) => c.conversions > 0);
+
+  if (candidates.length === 0) return {};
+
+  const byRoas = [...candidates].sort((a, b) => (b.roas ?? 0) - (a.roas ?? 0))[0];
+  const byConversions = [...candidates].sort((a, b) => b.conversions - a.conversions)[0];
+
+  const ids = Array.from(new Set([byRoas.ad_id, byConversions.ad_id]));
+  let creatives: Record<string, { image_url?: string; thumbnail_url?: string }> = {};
+  try {
+    creatives = await fetchAdCreatives(ids);
+  } catch (e) {
+    console.error("Erro ao buscar criativos dos anúncios destaque:", e);
+  }
+
+  const toTopAd = (c: Candidate): TopAd => ({
+    name: c.name,
+    campaign: c.campaign,
+    spend: c.spend,
+    conversions: c.conversions,
+    conv_value: c.conv_value,
+    roas: c.roas ?? 0,
+    image_url: creatives[c.ad_id]?.image_url,
+    thumbnail_url: creatives[c.ad_id]?.thumbnail_url,
+  });
+
+  return {
+    top_ad_roas: toTopAd(byRoas),
+    top_ad_conversions: toTopAd(byConversions),
+  };
+}
+
 export async function fetchMetaPlatformBlock(opts: {
   accountId: string;
   accountName: string;
   period: { start: string; end: string };
   previousPeriod: { start: string; end: string };
+  // Quando true, também busca a série diária de compras/ROAS e os anúncios
+  // destaque (chamadas extras à API — só vale a pena no modo Ao vivo, não no
+  // snapshot semanal salvo, que nunca exibe esse gráfico).
+  includeSalesInsights?: boolean;
 }): Promise<PlatformBlock> {
-  const { accountId, accountName, period, previousPeriod } = opts;
+  const { accountId, accountName, period, previousPeriod, includeSalesInsights } = opts;
 
-const [campaignsMeta, currInsights, prevInsights] = await Promise.all([
-  fetchCampaignsMeta(accountId),
-  fetchInsights(accountId, period.start, period.end),
-  fetchInsights(accountId, previousPeriod.start, previousPeriod.end),
+  const [campaignsMeta, currInsights, prevInsights] = await Promise.all([
+    fetchCampaignsMeta(accountId),
+    fetchInsights(accountId, period.start, period.end),
+    fetchInsights(accountId, previousPeriod.start, previousPeriod.end),
   ]);
 
-const currById = new Map(currInsights.map((r) => [r.campaign_id as string, r]));
+  const currById = new Map(currInsights.map((r) => [r.campaign_id as string, r]));
   const prevById = new Map(prevInsights.map((r) => [r.campaign_id as string, r]));
 
-// Universo de campanhas candidatas: ativas no cadastro OU com insight no
-// período atual (que pode ter impressões > 1 mesmo pausada).
-const candidateIds = new Set<string>([
-  ...Object.keys(campaignsMeta).filter((id) => campaignsMeta[id].effective_status === "ACTIVE"),
-  ...currInsights.map((r) => r.campaign_id as string),
+  // Universo de campanhas candidatas: ativas no cadastro OU com insight no
+  // período atual (que pode ter impressões > 1 mesmo pausada).
+  const candidateIds = new Set<string>([
+    ...Object.keys(campaignsMeta).filter((id) => campaignsMeta[id].effective_status === "ACTIVE"),
+    ...currInsights.map((r) => r.campaign_id as string),
   ]);
 
-const campaigns: Campaign[] = [];
+  const campaigns: Campaign[] = [];
+  const salesCampaignIds: string[] = [];
 
-for (const id of candidateIds) {
-  const meta = campaignsMeta[id];
-  const currRow = currById.get(id);
-  const impressions = Number(currRow?.impressions ?? 0);
-  const isActive = meta?.effective_status === "ACTIVE";
+  for (const id of candidateIds) {
+    const meta = campaignsMeta[id];
+    const currRow = currById.get(id);
+    const impressions = Number(currRow?.impressions ?? 0);
+    const isActive = meta?.effective_status === "ACTIVE";
 
-  // Regra da Oleak: ativa OU impressões > 1 no período.
-  if (!isActive && impressions <= 1) continue;
+    // Regra da Oleak: ativa OU impressões > 1 no período.
+    if (!isActive && impressions <= 1) continue;
 
-  const { metrics: curr, resultLabel } = toMetricSet(currRow);
-  const { metrics: prev } = toMetricSet(prevById.get(id));
+    const { metrics: curr, resultLabel } = toMetricSet(currRow);
+    const { metrics: prev } = toMetricSet(prevById.get(id));
 
-  campaigns.push({
-    name: meta?.name ?? (currRow?.campaign_name as string) ?? id,
-    status: isActive ? "ativa" : "pausada",
-    status_note: !isActive ? "Incluída por ter impressões > 1 no período" : undefined,
-    objective: meta?.objective ?? "—",
-    result_label: resultLabel,
-    curr,
-    prev,
-    delta_pct: deltaPct(curr, prev),
-  });
-}
+    campaigns.push({
+      name: meta?.name ?? (currRow?.campaign_name as string) ?? id,
+      status: isActive ? "ativa" : "pausada",
+      status_note: !isActive ? "Incluída por ter impressões > 1 no período" : undefined,
+      objective: meta?.objective ?? "—",
+      result_label: resultLabel,
+      curr,
+      prev,
+      delta_pct: deltaPct(curr, prev),
+    });
 
-campaigns.sort((a, b) => (b.curr.spend ?? 0) - (a.curr.spend ?? 0));
+    if (SALES_OBJECTIVES.includes(meta?.objective ?? "")) {
+      salesCampaignIds.push(id);
+    }
+  }
 
-const consolidatedCurr = sumMetricSet(campaigns, "curr");
+  campaigns.sort((a, b) => (b.curr.spend ?? 0) - (a.curr.spend ?? 0));
+
+  const consolidatedCurr = sumMetricSet(campaigns, "curr");
   const consolidatedPrev = sumMetricSet(campaigns, "prev");
 
-return {
-  account_id: accountId,
-  account_name: accountName,
-  campaigns,
-  consolidated: {
-    curr: consolidatedCurr,
-    prev: consolidatedPrev,
-    delta_pct: deltaPct(consolidatedCurr, consolidatedPrev),
-  },
-  excluded_note: `Campanhas filtradas automaticamente (ativas OU impressões > 1 no período). Anúncio destaque e melhor conjunto por ROAS ainda não são calculados automaticamente — a preencher manualmente se precisar deles na reunião.`,
-};
+  const block: PlatformBlock = {
+    account_id: accountId,
+    account_name: accountName,
+    campaigns,
+    consolidated: {
+      curr: consolidatedCurr,
+      prev: consolidatedPrev,
+      delta_pct: deltaPct(consolidatedCurr, consolidatedPrev),
+    },
+    excluded_note: `Campanhas filtradas automaticamente (ativas OU impressões > 1 no período).`,
+  };
+
+  if (includeSalesInsights && salesCampaignIds.length > 0) {
+    try {
+      const [dailyRows, topAds] = await Promise.all([
+        fetchDailySalesInsights(accountId, salesCampaignIds, period.start, period.end),
+        fetchTopSalesAds(accountId, salesCampaignIds, period.start, period.end),
+      ]);
+      block.daily_sales = buildDailySalesSeries(dailyRows);
+      block.top_ad_roas = topAds.top_ad_roas;
+      block.top_ad_conversions = topAds.top_ad_conversions;
+    } catch (e: any) {
+      // Não derruba o relatório inteiro por causa do gráfico/destaque —
+      // as métricas principais continuam valendo mesmo se isso falhar.
+      console.error("Erro ao buscar insights diários/anúncios destaque (Meta):", e);
+    }
+  }
+
+  return block;
 }
