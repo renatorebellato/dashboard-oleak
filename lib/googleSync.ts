@@ -56,7 +56,7 @@ async function runGaql(customerId: string, query: string): Promise<GaqlRow[]> {
   return runGaqlRaw<GaqlRow>(customerId, query);
 }
 
-async function runGaqlRaw<T>(customerId: string, query: string): Promise<T[]> {
+export async function runGaqlRaw<T>(customerId: string, query: string): Promise<T[]> {
   const developerToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN;
   const loginCustomerId = process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID; // ID do MCC, só dígitos
 if (!developerToken) throw new Error("GOOGLE_ADS_DEVELOPER_TOKEN não configurado.");
@@ -265,14 +265,14 @@ export async function listMccAccountsByName(nameFilter: string): Promise<MccAcco
 
 // Nome curto da unidade: tira o filtro do começo ("[Meddi] Multimagem -
 // Salvador" -> "Multimagem - Salvador").
-function shortAccountName(name: string, nameFilter: string): string {
+export function shortAccountName(name: string, nameFilter: string): string {
   const idx = name.toLowerCase().indexOf(nameFilter.trim().toLowerCase());
   if (idx < 0) return name;
   const cleaned = (name.slice(0, idx) + name.slice(idx + nameFilter.trim().length)).replace(/\s+/g, " ").trim();
   return cleaned.replace(/^[-–:·|]\s*/, "") || name;
 }
 
-function formatCustomerId(id: string): string {
+export function formatCustomerId(id: string): string {
   const d = id.replace(/\D/g, "");
   return d.length === 10 ? `${d.slice(0, 3)}-${d.slice(3, 6)}-${d.slice(6)}` : id;
 }
