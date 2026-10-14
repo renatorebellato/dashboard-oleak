@@ -291,8 +291,8 @@ export default function Dashboard({ defaultPeriod = "7d" }: { defaultPeriod?: st
             className="btn"
             onClick={async () => {
               await fetch("/api/auth/logout", { method: "POST" });
-              const m = window.location.pathname.match(/^\/c\/([a-z0-9-]+)/);
-              window.location.href = m ? `/c/${m[1]}/login` : "/login";
+              const m = window.location.pathname.match(/^\/(?:c\/)?([a-z0-9-]+)/);
+              window.location.href = m ? `/${m[1]}/login` : "/";
             }}
           >
             Sair

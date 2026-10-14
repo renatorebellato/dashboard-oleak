@@ -23,7 +23,7 @@ export default function LoginForm({ slug, clientName }: { slug: string; clientNa
         setLoading(false);
         return;
       }
-      window.location.href = slug === "oleak" ? "/" : `/c/${slug}`;
+      window.location.href = `/${slug}`;
     } catch {
       setError("Não foi possível entrar. Tente novamente.");
       setLoading(false);
