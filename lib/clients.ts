@@ -12,6 +12,13 @@ export type ClientRecord = {
   google_account_name: string | null;
   google_mcc_name: string | null;
   ga4_property_id: string | null;
+  // Quando preenchido (ex: "[Meddi]"), o Google Ads do cliente vira a soma de
+  // TODAS as contas da MCC cujo nome contém esse texto — em vez de uma conta
+  // só (google_customer_id). Contas novas com o mesmo prefixo entram sozinhas.
+  google_account_filter?: string | null;
+  // Período que o dashboard abre por padrão: "7d", "14d", "30d", "month" ou
+  // "ytd" (ano atual). Vazio = 7 dias.
+  default_period?: string | null;
   created_at: string;
 };
 

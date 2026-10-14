@@ -14,6 +14,10 @@ export type MetricSet = {
 
 export type Campaign = {
   name: string;
+  // Preenchidos só quando o bloco junta várias contas (ex: Grupo Meddi, com
+  // uma conta do Google Ads por unidade) — identificam de qual conta veio.
+  account_id?: string;
+  account_name?: string;
   status: "ativa" | "pausada";
   status_note?: string;
   objective: string;
@@ -46,6 +50,20 @@ export type DailySalesPoint = {
   roas: number | null;
 };
 
+// Resumo de uma conta dentro de um bloco multi-conta (uma linha da tabela
+// "Por unidade").
+export type AccountSummary = {
+  account_id: string;
+  account_name: string;
+  status?: string;
+  note?: string;
+  campaigns_total: number;
+  campaigns_active: number;
+  curr: MetricSet;
+  prev: MetricSet;
+  delta_pct: Record<string, number | null>;
+};
+
 export type PlatformBlock = {
   account_id: string;
   account_name: string;
@@ -68,6 +86,9 @@ export type PlatformBlock = {
   // Série diária de compras + ROAS (idem, só quando includeSalesInsights).
   daily_sales?: DailySalesPoint[];
   excluded_note?: string;
+  // Só em blocos multi-conta (cliente com google_account_filter): uma
+  // entrada por conta encontrada na MCC.
+  accounts?: AccountSummary[];
 };
 
 export type ReportData = {
