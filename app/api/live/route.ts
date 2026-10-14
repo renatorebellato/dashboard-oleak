@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { computeLiveWeekPeriod, computeCustomPeriod } from "@/lib/period";
 import { fetchMetaPlatformBlock } from "@/lib/metaSync";
-import { fetchGooglePlatformBlock } from "@/lib/googleSync";
+import { fetchGoogleForClient } from "@/lib/googleSync";
 import { requireClient } from "@/lib/session";
 import type { ReportData } from "@/lib/types";
 
@@ -76,15 +76,8 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  if (client.google_customer_id) {
-    report.google = await fetchGooglePlatformBlock({
-      customerId: client.google_customer_id,
-      accountName: client.google_account_name ?? client.name,
-      mccName: client.google_mcc_name ?? "Elo Criativo",
-      period,
-      previousPeriod: previous_period,
-    });
-  }
+  const googleBlock = await fetchGoogleForClient(client, period, previous_period);
+  if (googleBlock) report.google = googleBlock;
 
   if (cache.size > 60) cache.clear();
   cache.set(cacheKey, { data: report, expiresAt: Date.now() + CACHE_MS });
