@@ -1,4 +1,5 @@
 import Dashboard from "@/components/Dashboard";
+import GroupDashboard from "@/components/group/GroupDashboard";
 import { notFound } from "next/navigation";
 import { getClientBySlug } from "@/lib/clients";
 
@@ -14,5 +15,8 @@ export default async function ClientPage({ params }: { params: Promise<{ slug: s
   const client = await getClientBySlug(slug);
   if (!client || !client.active) notFound();
   const defaultPeriod = client.default_period && VALID_PERIODS.has(client.default_period) ? client.default_period : "7d";
+  // Clientes com várias contas do Google Ads (filtro por nome na MCC) usam o
+  // layout de grupo, com filtros de conta e campanha.
+  if (client.google_account_filter?.trim()) return <GroupDashboard defaultPeriod={defaultPeriod} />;
   return <Dashboard defaultPeriod={defaultPeriod} />;
 }
