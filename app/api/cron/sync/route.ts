@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { computeWeekPeriod } from "@/lib/period";
 import { fetchMetaPlatformBlock } from "@/lib/metaSync";
-import { fetchGooglePlatformBlock } from "@/lib/googleSync";
+import { fetchGoogleForClient } from "@/lib/googleSync";
 import { getOrInitReport, saveReport } from "@/lib/reportStore";
 import { listActiveClients } from "@/lib/clients";
 
@@ -59,17 +59,13 @@ export async function GET(req: NextRequest) {
         }
       }
 
-      if (client.google_customer_id) {
-        report.google = await fetchGooglePlatformBlock({
-          customerId: client.google_customer_id,
-          accountName: client.google_account_name ?? client.name,
-          mccName: client.google_mcc_name ?? "Elo Criativo",
-          period,
-          previousPeriod: previous_period,
-        });
+      const googleBlock = await fetchGoogleForClient(client, period, previous_period);
+      if (googleBlock) {
+        report.google = googleBlock;
         entry.google = {
           ok: report.google.status !== "erro_sincronizacao",
           campanhas: report.google.campaigns.length,
+          contas: report.google.accounts?.length,
           status: report.google.status,
         };
       }
