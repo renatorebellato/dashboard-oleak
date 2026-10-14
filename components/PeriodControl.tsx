@@ -37,6 +37,7 @@ export const PRESETS = [
   { key: "14d", label: "14 dias" },
   { key: "30d", label: "30 dias" },
   { key: "month", label: "Mês atual" },
+  { key: "ytd", label: "Ano atual" },
   { key: "custom", label: "Personalizado" },
 ] as const;
 
@@ -49,6 +50,8 @@ export function presetToRange(key: string): { start: string; end: string } {
       return { start: addDays(end, -29), end };
     case "month":
       return { start: firstOfMonth(end), end };
+    case "ytd":
+      return { start: `${end.slice(0, 4)}-01-01`, end };
     default:
       return { start: addDays(end, -6), end };
   }

@@ -31,13 +31,14 @@ export default function CampaignTable({ campaigns }: { campaigns: Campaign[] }) 
               const conv = c.curr.conversions ?? c.curr.results ?? null;
               const cpa = c.curr.cpa ?? (c.curr.conversions ? c.curr.spend / c.curr.conversions : null);
               return (
-                <tr key={c.name}>
+                <tr key={`${c.account_id ?? ""}:${c.name}`}>
                   <td className="campaign-name-cell">
                     <div className="campaign-name">
                       <span className={`status-dot ${c.status}`} title={c.status === "ativa" ? "Ativa" : "Pausada"} />
                       {c.name}
                     </div>
                     <div className="campaign-meta">
+                      {c.account_name ? <span className="unit-tag">{c.account_name}</span> : null}
                       {c.objective}
                       {c.status_note ? ` · ${c.status_note}` : ""}
                     </div>

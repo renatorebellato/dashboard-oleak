@@ -12,6 +12,7 @@ import SalesChart from "@/components/SalesChart";
 import TopAdsHighlight from "@/components/TopAdsHighlight";
 import InvestmentSplit from "@/components/InvestmentSplit";
 import BudgetControl, { useMonthlyBudget } from "@/components/BudgetControl";
+import AccountSummaryTable from "@/components/AccountSummaryTable";
 
 const LIVE_REFRESH_MS = 5 * 60 * 1000; // atualiza sozinho a cada 5 minutos
 const HISTORY_REFRESH_MS = 2 * 60 * 1000; // recarrega o histórico sozinho a cada 2 minutos
@@ -54,6 +55,10 @@ function ReportView({
   const combinedPrev = combineMetricSets(meta.consolidated?.prev, google.consolidated?.prev);
   const combinedDelta = deltaPct(combinedCurr, combinedPrev);
   const days = periodDays(data.period);
+  // Cliente sem conta Meta (ex: Grupo Meddi, só Google Ads): esconde a seção
+  // do Meta e a barra de divisão Meta x Google.
+  const hasMeta = !!meta.account_id || meta.campaigns.length > 0 || !!meta.consolidated;
+  const hasGoogle = !!google.account_id || google.campaigns.length > 0 || !!google.consolidated;
 
   return (
     <>
@@ -67,7 +72,7 @@ function ReportView({
             <StatTile label="Conversões" value={fmtInt(combinedCurr.conversions)} deltaPct={combinedDelta.conversions} />
             <StatTile label="ROAS" value={fmtRoas(combinedCurr.roas)} deltaPct={combinedDelta.roas} />
           </div>
-          <InvestmentSplit metaSpend={meta.consolidated?.curr.spend ?? 0} googleSpend={google.consolidated?.curr.spend ?? 0} />
+          {hasMeta && hasGoogle && <InvestmentSplit metaSpend={meta.consolidated?.curr.spend ?? 0} googleSpend={google.consolidated?.curr.spend ?? 0} />}
           <BudgetControl
             metaSpend={meta.consolidated?.curr.spend ?? 0}
             googleSpend={google.consolidated?.curr.spend ?? 0}
@@ -79,6 +84,7 @@ function ReportView({
       )}
 
       {/* Meta Ads */}
+      {hasMeta && (
       <section className="platform-section">
         <div className="platform-header">
           <span className="platform-badge meta">Meta Ads</span>
@@ -99,6 +105,7 @@ function ReportView({
           <div className="empty-state">{meta.note ?? "Sem campanhas ativas ou com impressões no período."}</div>
         )}
       </section>
+      )}
 
       {/* Google Ads */}
       <section className="platform-section">
@@ -106,13 +113,24 @@ function ReportView({
           <span className="platform-badge google">Google Ads</span>
           <h2>{google.account_name}</h2>
           <span className="acct">
-            conta {google.account_id}
+            {google.accounts ? google.account_id : `conta ${google.account_id}`}
             {google.mcc ? ` · MCC ${google.mcc}` : ""}
             {google.consolidated && ` · ${fmtBRL(google.consolidated.curr.spend)} investidos`}
           </span>
         </div>
+        {google.accounts && google.accounts.length > 0 && (
+          <>
+            <h3 className="sub-section-title">Por unidade</h3>
+            <AccountSummaryTable accounts={google.accounts} />
+            <h3 className="sub-section-title">Campanhas</h3>
+          </>
+        )}
+        {google.note && google.campaigns.length > 0 && <p className="footer-note">{google.note}</p>}
         {google.campaigns.length > 0 ? (
-          <CampaignTable campaigns={google.campaigns} />
+          <>
+            <CampaignTable campaigns={google.campaigns} />
+            {google.excluded_note && <p className="footer-note">{google.excluded_note}</p>}
+          </>
         ) : (
           <div className="empty-state">{google.note ?? "Sem campanhas ativas ou com impressões no período."}</div>
         )}
@@ -121,12 +139,12 @@ function ReportView({
   );
 }
 
-export default function Dashboard() {
+export default function Dashboard({ defaultPeriod = "7d" }: { defaultPeriod?: string }) {
   const [mode, setMode] = useState<"live" | "historico">("live");
   const [monthlyBudget, setMonthlyBudget] = useMonthlyBudget();
 
   // --- Modo Ao vivo: busca direto do Meta Ads e Google Ads via /api/live ---
-  const [period, setPeriod] = useState(() => ({ key: "7d", ...presetToRange("7d") }));
+  const [period, setPeriod] = useState(() => ({ key: defaultPeriod, ...presetToRange(defaultPeriod) }));
   const [liveData, setLiveData] = useState<ReportData | null>(null);
   const [liveLoading, setLiveLoading] = useState(true);
   const [liveError, setLiveError] = useState<string | null>(null);
@@ -304,7 +322,7 @@ export default function Dashboard() {
             )}
             <ReportView data={liveData} monthlyBudget={monthlyBudget} onChangeBudget={setMonthlyBudget} />
             <p className="footer-note">
-              Dados buscados direto do Meta Ads e do Google Ads em {new Date(liveData.generated_at).toLocaleString("pt-BR")}
+              Dados buscados direto das plataformas de anúncio em {new Date(liveData.generated_at).toLocaleString("pt-BR")}
               . Atualiza sozinho a cada 5 minutos, ou clique em &quot;Atualizar agora&quot;.
             </p>
           </>
