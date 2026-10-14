@@ -1,4 +1,5 @@
 import Dashboard from "@/components/Dashboard";
+import { notFound } from "next/navigation";
 import { getClientBySlug } from "@/lib/clients";
 
 export const dynamic = "force-dynamic";
@@ -11,6 +12,7 @@ export default async function ClientPage({ params }: { params: Promise<{ slug: s
   // período padrão do cadastro (ex: Grupo Meddi abre em "Ano atual").
   const { slug } = await params;
   const client = await getClientBySlug(slug);
-  const defaultPeriod = client?.default_period && VALID_PERIODS.has(client.default_period) ? client.default_period : "7d";
+  if (!client || !client.active) notFound();
+  const defaultPeriod = client.default_period && VALID_PERIODS.has(client.default_period) ? client.default_period : "7d";
   return <Dashboard defaultPeriod={defaultPeriod} />;
 }
