@@ -1,17 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/auth";
 
-// Slug usado quando a URL não tem "/c/<slug>" — mantém a raiz do domínio
-// (dashboard-oleak.vercel.app) funcionando exatamente como antes para a
-// Oleak, sem quebrar o link/senha que o cliente já usa.
-const DEFAULT_SLUG = "oleak";
+// Cada cliente tem o próprio caminho: elocriativo.vercel.app/<slug> (ex:
+// /oleak, /grupo-meddi) e /<slug>/login. Os caminhos antigos (/c/<slug>,
+// /login, domínio dashboard-oleak) são redirecionados em next.config.js
+// antes de chegar aqui. A raiz (/) é uma página neutra, sem login.
+const RESERVED = new Set(["api", "c", "login", "_next"]);
 
 function parsePagePath(pathname: string): { slug: string; isLogin: boolean } | null {
-  if (pathname === "/") return { slug: DEFAULT_SLUG, isLogin: false };
-  if (pathname === "/login") return { slug: DEFAULT_SLUG, isLogin: true };
-  const m = pathname.match(/^\/c\/([a-z0-9-]+)(\/login)?$/);
-  if (m) return { slug: m[1], isLogin: !!m[2] };
-  return null; // não é uma rota de página conhecida (deixa passar)
+  const m = pathname.match(/^\/([a-z0-9-]+)(\/login)?\/?$/);
+  if (m && !RESERVED.has(m[1])) return { slug: m[1], isLogin: !!m[2] };
+  return null; // não é uma página de cliente (deixa passar)
 }
 
 export async function middleware(req: NextRequest) {
@@ -39,8 +38,7 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  const loginPath = info.slug === DEFAULT_SLUG ? "/login" : `/c/${info.slug}/login`;
-  return NextResponse.redirect(new URL(loginPath, req.url));
+  return NextResponse.redirect(new URL(`/${info.slug}/login`, req.url));
 }
 
 export const config = {
